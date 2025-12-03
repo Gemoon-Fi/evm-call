@@ -9,6 +9,7 @@ export default function Upload({
     <input
       className="p-2 border-2 border-black rounded-lg cursor-pointer"
       type="file"
+      accept=".json"
       onChange={(e) => uploadCb(e.target.files?.[0] as File)}
     />
   );

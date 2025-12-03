@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Field from "./components/Field";
 import { readContract, writeContract } from "@wagmi/core";
-import { useAccount, useConfig } from "wagmi";
+import { useMemo, useState } from "react";
+import { useAccount, useConfig, useStorageAt } from "wagmi";
+import { getAddress } from "viem";
+import Field from "./components/Field";
 import Upload from "./components/Upload";
 
 type AbiInput = {
@@ -15,7 +16,11 @@ type AbiFunction = {
   type?: string;
   name?: string;
   inputs?: AbiInput[];
+  stateMutability?: string;
 };
+
+const implementationSlot =
+  "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 
 export default function Home() {
   const [result, setResult] = useState<unknown>("");
@@ -30,9 +35,42 @@ export default function Home() {
     abi && contractAddress && selectedFunction && address
   );
 
-  const functionInputs = useMemo<AbiInput[]>(() => {
+  const { data } = useStorageAt({
+    address: contractAddress as `0x${string}`,
+    chainId: chainId,
+    slot: implementationSlot,
+  });
+
+  console.log("implementation address storage data:", data);
+
+  const isProxy = Boolean(
+    data &&
+      data !==
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+  );
+
+  const implementationAddress = useMemo(() => {
+    if (!data) {
+      return null;
+    }
+
+    try {
+      const hexWithoutPrefix = data.replace(/^0x/, "");
+      if (hexWithoutPrefix.length < 40) {
+        return null;
+      }
+
+      const addressHex = `0x${hexWithoutPrefix.slice(-40)}`;
+      return getAddress(addressHex);
+    } catch (error) {
+      console.error("Failed to derive implementation address", error);
+      return null;
+    }
+  }, [data]);
+
+  const selectedFunctionDefinition = useMemo<AbiFunction | null>(() => {
     if (!abi || !selectedFunction) {
-      return [];
+      return null;
     }
 
     try {
@@ -41,12 +79,32 @@ export default function Home() {
         (item) => item.type === "function" && item.name === selectedFunction
       );
 
-      return Array.isArray(fnDefinition?.inputs) ? fnDefinition.inputs : [];
+      return fnDefinition ?? null;
     } catch (error) {
-      console.error("Failed to parse ABI for inputs", error);
-      return [];
+      console.error("Failed to parse ABI for function metadata", error);
+      return null;
     }
   }, [abi, selectedFunction]);
+
+  const functionInputs = useMemo(
+    () => selectedFunctionDefinition?.inputs ?? [],
+    [selectedFunctionDefinition]
+  );
+
+  const isReadOnlyFunction = useMemo(() => {
+    if (!selectedFunctionDefinition?.stateMutability) {
+      return false;
+    }
+
+    return ["view", "pure"].includes(
+      selectedFunctionDefinition.stateMutability
+    );
+  }, [selectedFunctionDefinition]);
+
+  const canPressRead = Boolean(canCall && isReadOnlyFunction);
+  const canPressWrite = Boolean(
+    canCall && selectedFunctionDefinition && !isReadOnlyFunction
+  );
 
   const activeArgs = useMemo(() => {
     if (!selectedFunction) {
@@ -99,17 +157,27 @@ export default function Home() {
       setResult("Error reading contract: " + (err as Error).message);
     }
   };
+  const newLocal: React.ReactNode =
+    result !== undefined && result !== null && result !== "" ? (
+      <span className="rounded-lg bg-amber-200 p-2">
+        {typeof result === "object" ? JSON.stringify(result) : String(result)}
+      </span>
+    ) : null;
+
   return (
     <div className="w-screen h-screen">
       <div className="w-[50%] flex flex-col pt-2.5 px-4 gap-4">
         <label className="text-xl font-bold">Contract Call</label>
         <label className="text-lg font-bold">Chain ID: {chainId}</label>
         <label className="text-lg font-bold">Chain: {chain?.name}</label>
-        <div className="flex flex-col gap-2">
+        <label className="text-lg font-bold">
+          Contract implementation address:{" "}
+          {implementationAddress?.toLowerCase() ?? "Not available"}
+        </label>
+        <div className="flex flex-col gap-2 border-t-2 border-blue-500 p-5 border-2 rounded-xl">
           <textarea
             placeholder="Define ABI"
             className="rounded-lg border-2 p-2"
-            defaultValue={abi}
             value={abi}
             onChange={(e) => {
               if (!e.target.value) {
@@ -143,18 +211,28 @@ export default function Home() {
             text="Upload ABI JSON"
           />
         </div>
-        <Field
-          onChange={(e) => {
-            if (e.target.value.length > 2 && !e.target.value.startsWith("0x")) {
-              alert("Contract address must start with 0x");
-              e.target.value = "";
-              return;
-            }
-            setContractAddress(e.target.value);
-          }}
-          placeholder="Contract address"
-          value={contractAddress}
-        />
+        <div className="flex flew-row gap-2.5 justify-center items-center">
+          <Field
+            onChange={(e) => {
+              if (
+                e.target.value.length > 2 &&
+                !e.target.value.startsWith("0x")
+              ) {
+                alert("Contract address must start with 0x");
+                e.target.value = "";
+                return;
+              }
+              setContractAddress(e.target.value);
+            }}
+            placeholder="Contract address"
+            value={contractAddress}
+          />
+          {isProxy && (
+            <span className="bg-green-300 rounded-lg text-center text-white font-bold p-2 text-nowrap">
+              Contract is proxy
+            </span>
+          )}
+        </div>
         {functionInputs.length > 0 && (
           <div className="flex flex-col gap-2">
             <label className="text-lg font-semibold">Arguments</label>
@@ -205,25 +283,26 @@ export default function Home() {
         </div>
         <div className="flex flex-row gap-2.5">
           <button
-            disabled={canCall === false}
+            disabled={!canPressRead}
             onClick={onClickRead}
             className={`w-full h-full rounded-lg bg-blue-500 text-white p-2 ${
-              canCall === false ? "opacity-50 cursor-not-allowed" : ""
+              !canPressRead ? "opacity-50 cursor-not-allowed" : ""
             }`}
           >
             Read
           </button>
           <button
-            disabled={canCall === false}
+            disabled={!canPressWrite}
             onClick={onClickWrite}
             className={`w-full h-full rounded-lg bg-blue-500 text-white p-2 ${
-              canCall === false ? "opacity-50 cursor-not-allowed" : ""
+              !canPressWrite ? "opacity-50 cursor-not-allowed" : ""
             }`}
           >
             Write
           </button>
         </div>
-        <span>Reulst: {result as string}</span>
+        <label>Result</label>
+        {newLocal}
       </div>
     </div>
   );
