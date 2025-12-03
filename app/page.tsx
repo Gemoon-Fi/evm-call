@@ -30,6 +30,7 @@ export default function Home() {
   const [functionNames, setFunctionNames] = useState<string[]>([]);
   const [selectedFunction, setSelectedFunction] = useState("");
   const [argValues, setArgValues] = useState<Record<string, string[]>>({});
+  const [disableAbiChange, setDisableAbiChange] = useState(false);
   const config = useConfig();
   const canCall = Boolean(
     abi && contractAddress && selectedFunction && address
@@ -177,7 +178,8 @@ export default function Home() {
         <div className="flex flex-col gap-2 border-t-2 border-blue-500 p-5 border-2 rounded-xl">
           <textarea
             placeholder="Define ABI"
-            className="rounded-lg border-2 p-2"
+            disabled={disableAbiChange}
+            className={`rounded-lg border-2 p-2 ${disableAbiChange ? "bg-gray-200" : ""}`}
             value={abi}
             onChange={(e) => {
               if (!e.target.value) {
@@ -207,6 +209,7 @@ export default function Home() {
                   .map((item: { name: string }) => item.name);
                 setFunctionNames(fnNames.length > 0 ? fnNames : []);
               };
+              setDisableAbiChange(true);
             }}
             text="Upload ABI JSON"
           />
