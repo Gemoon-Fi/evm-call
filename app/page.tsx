@@ -159,7 +159,7 @@ export default function Home() {
   };
   const newLocal: React.ReactNode =
     result !== undefined && result !== null && result !== "" ? (
-      <span className="rounded-lg bg-amber-200 p-2">
+      <span className="rounded-lg bg-amber-200 p-2 text-clip overflow-scroll border-2">
         {typeof result === "object" ? JSON.stringify(result) : String(result)}
       </span>
     ) : null;
@@ -237,24 +237,67 @@ export default function Home() {
           <div className="flex flex-col gap-2">
             <label className="text-lg font-semibold">Arguments</label>
             {functionInputs.map((input, index) => (
-              <Field
+              <div
                 key={`${selectedFunction}-${input.name ?? index}`}
-                placeholder={
-                  input.name ? `${input.name} (${input.type})` : `arg${index}`
-                }
-                value={activeArgs[index] ?? ""}
-                onChange={(e) => {
-                  setArgValues((prev) => {
-                    const next = { ...prev };
-                    const current = next[selectedFunction] ?? [];
-                    const updated = [...current];
-                    updated[index] = e.target.value;
-                    next[selectedFunction] = updated;
-                    return next;
-                  });
-                }}
-                name={input.name}
-              />
+                className="flex items-center gap-2"
+              >
+                <Field
+                  placeholder={
+                    input.name ? `${input.name} (${input.type})` : `arg${index}`
+                  }
+                  value={activeArgs[index] ?? ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setArgValues((prev) => {
+                      const next = { ...prev };
+                      const current = next[selectedFunction] ?? [];
+                      const updated = [...current];
+                      updated[index] = value;
+                      next[selectedFunction] = updated;
+                      return next;
+                    });
+                  }}
+                  name={input.name}
+                />
+                {input.type?.toLowerCase().includes("address") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!address) {
+                        return;
+                      }
+                      setArgValues((prev) => {
+                        const next = { ...prev };
+                        const current = next[selectedFunction] ?? [];
+                        const updated = [...current];
+                        updated[index] = address.toLowerCase();
+                        next[selectedFunction] = updated;
+                        return next;
+                      });
+                    }}
+                    disabled={!address}
+                    className="h-12 w-12 flex items-center justify-center rounded-lg border-2 border-blue-500 text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Use connected address"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="24"
+                      height="24"
+                      viewBox="0 0 32 32"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M26 20h-8.17l2.58-2.59L19 16l-5 5l5 5l1.41-1.41L17.83 22H26v8h2v-8a2 2 0 0 0-2-2"
+                      />
+                      <path
+                        fill="currentColor"
+                        d="m23.71 9.29l-7-7A1 1 0 0 0 16 2H6a2 2 0 0 0-2 2v24a2 2 0 0 0 2 2h8v-2H6V4h8v6a2 2 0 0 0 2 2h6v2h2v-4a1 1 0 0 0-.29-.71M16 4.41L21.59 10H16Z"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}

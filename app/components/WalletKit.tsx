@@ -11,6 +11,7 @@ import {
   base,
   monad,
   monadTestnet,
+  sepolia,
 } from "wagmi/chains";
 
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
@@ -25,7 +26,7 @@ export default function WalletKit({
   const config = getDefaultConfig({
     appName: "EVM Debug",
     projectId: "EVM_DEBUG_PROJECT_ID",
-    chains: [mainnet, polygon, optimism, arbitrum, base, monad, monadTestnet],
+    chains: [mainnet, polygon, optimism, arbitrum, base, monad, monadTestnet,sepolia],
     ssr: true, // If your dApp uses server side rendering (SSR)
   });
 
