@@ -127,6 +127,9 @@ export default function Home() {
   const [isEOA, setIsEOA] = useState<boolean | null>(false);
   const config = useConfig();
   const [keccakHash, setKeccakHash] = useState<`0x${string}`>("0x");
+  const [clipboardSelected, setClipboardSelected] = useState<
+    string | undefined
+  >(undefined);
   const canCall = Boolean(
     abi && contractAddress && selectedFunction && address
   );
@@ -134,6 +137,19 @@ export default function Home() {
     string | undefined | null
   >(undefined);
   const [slot, setSlot] = useState<string | undefined>("");
+
+  useEffect(() => {
+    const listener = async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        setClipboardSelected(text);
+        console.log("Clipboard text selected:", text);
+      } catch (err) {
+        console.error("Failed to read clipboard contents: ", err);
+      }
+    };
+    document.addEventListener("copy", listener);
+  }, []);
 
   useEffect(() => {
     async function bgJobs() {
@@ -657,7 +673,9 @@ export default function Home() {
             <span className="wrap-break-word whitespace-pre-wrap w-full">
               {storageSlotContent}
             </span>
-            <span className="font-semibold border-t-2 pt-4 w-full h-full text-left">Keccak256: {keccakHash}</span>
+            <span className="font-semibold border-t-2 pt-4 w-full h-full text-left">
+              Keccak256: {keccakHash}
+            </span>
             <Field
               placeholder="Enter value for HASHING"
               name="keccak256"
@@ -676,6 +694,9 @@ export default function Home() {
                 setKeccakHash(keccak256(hexInput));
               }}
             />
+            <span className="font-semibold border-t-2 pt-4 w-full h-full text-left">
+              Clipboard keccak256: {keccak256((`0x${(clipboardSelected ?? "")}`) as `0x${string}`)}
+            </span>
           </div>
         </div>
       </div>
