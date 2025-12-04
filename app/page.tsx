@@ -1,9 +1,9 @@
 "use client";
 
-import { readContract, writeContract } from "@wagmi/core";
-import { useMemo, useState } from "react";
-import { useAccount, useConfig, useStorageAt } from "wagmi";
+import { readContract, writeContract, getBytecode } from "@wagmi/core";
+import { useEffect, useMemo, useState } from "react";
 import { getAddress } from "viem";
+import { useAccount, useConfig, useStorageAt } from "wagmi";
 import Field from "./components/Field";
 import Upload from "./components/Upload";
 
@@ -19,6 +19,29 @@ type AbiFunction = {
   stateMutability?: string;
 };
 
+const ownerAbi = [
+  {
+    type: "function",
+    name: "owner",
+    inputs: [],
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+  },
+];
+
+const hasRoleAbi = [
+  {
+    type: "function",
+    name: "hasRole",
+    inputs: [
+      { name: "role", type: "bytes32", internalType: "bytes32" },
+      { name: "account", type: "address", internalType: "address" },
+    ],
+    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    stateMutability: "view",
+  },
+];
+
 const implementationSlot =
   "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 
@@ -31,10 +54,74 @@ export default function Home() {
   const [selectedFunction, setSelectedFunction] = useState("");
   const [argValues, setArgValues] = useState<Record<string, string[]>>({});
   const [disableAbiChange, setDisableAbiChange] = useState(false);
+  const [owner, setOwner] = useState<string>("");
+  const [hasAdminRole, setHasAdminRole] = useState<boolean | null>(null);
+  const [isEOA, setIsEOA] = useState<boolean | null>(false);
   const config = useConfig();
   const canCall = Boolean(
     abi && contractAddress && selectedFunction && address
   );
+
+  useEffect(() => {
+    async function bgJobs() {
+      try {
+        if (!contractAddress) {
+          setOwner("N/A");
+          return;
+        }
+        const res = readContract(config, {
+          abi: ownerAbi,
+          functionName: "owner",
+          chainId: chainId,
+          address: contractAddress as `0x${string}`,
+        });
+        console.log("fetched owner:", await res);
+        if (!res) {
+          setOwner("N/A");
+          return;
+        }
+        setOwner((await res) as string);
+      } catch (error) {
+        console.error("Failed to fetch owner:", error);
+        setOwner("Error (possible contract isn't ownable)");
+      }
+
+      try {
+        const hasAdmin = await readContract(config, {
+          abi: hasRoleAbi,
+          functionName: "hasRole",
+          chainId: chainId,
+          address: contractAddress as `0x${string}`,
+          args: [
+            "0x0000000000000000000000000000000000000000000000000000000000000000", // Replace with actual admin role hash
+            address as `0x${string}`,
+          ],
+        });
+        setHasAdminRole(hasAdmin as boolean);
+      } catch (error) {
+        console.error("Failed to fetch admin role:", error);
+        setHasAdminRole(null);
+      }
+
+      try {
+        const bytecode = await getBytecode(config, {
+          address: contractAddress as `0x${string}`,
+          chainId: chainId,
+        });
+        console.log("Contract bytecode:", bytecode);
+        const isEoa = bytecode === undefined || bytecode === "0x";
+        setIsEOA(isEoa);
+      } catch (error) {
+        console.error("Failed to fetch contract bytecode:", error);
+      }
+
+      if (!contractAddress) {
+        return;
+      }
+    }
+
+    bgJobs();
+  }, [contractAddress, chainId, config]);
 
   const { data } = useStorageAt({
     address: contractAddress as `0x${string}`,
@@ -166,11 +253,14 @@ export default function Home() {
     ) : null;
 
   return (
-    <div className="w-screen h-screen">
-      <div className="w-[50%] flex flex-col pt-2.5 px-4 gap-4">
+    <div className="w-screen h-screen flex flex-row justify-between items-start p-4 gap-10">
+      <div className="w-full flex flex-col pt-2.5 px-4 gap-4 border-r-2">
         <label className="text-xl font-bold">Contract Call</label>
         <label className="text-lg font-bold">Chain ID: {chainId}</label>
         <label className="text-lg font-bold">Chain: {chain?.name}</label>
+        <label className="text-lg font-bold">
+          Is EOA: {isEOA === null ? "N/A" : isEOA ? "YES" : "NO"}
+        </label>
         <label className="text-lg font-bold">
           Contract implementation address:{" "}
           {implementationAddress?.toLowerCase() ?? "Not available"}
@@ -179,7 +269,9 @@ export default function Home() {
           <textarea
             placeholder="Define ABI"
             disabled={disableAbiChange}
-            className={`rounded-lg border-2 p-2 ${disableAbiChange ? "bg-gray-200" : ""}`}
+            className={`rounded-lg border-2 p-2 ${
+              disableAbiChange ? "bg-gray-200" : ""
+            }`}
             value={abi}
             onChange={(e) => {
               if (!e.target.value) {
@@ -306,12 +398,15 @@ export default function Home() {
         )}
         <div className="w-full h-full flex flex-row gap-2.5 justify-center items-center">
           <select
+            disabled={functionNames.length === 0}
             value={selectedFunction}
             onChange={(e) => {
               console.log(e.currentTarget.value);
               setSelectedFunction(e.currentTarget.value);
             }}
-            className="border-2 rounded-lg p-2 w-full h-full"
+            className={`border-2 rounded-lg p-2 w-full h-full ${
+              functionNames.length === 0 ? "opacity-50 cursor-not-allowed" : ""
+            }`}
           >
             <option value="">Select function</option>
             {functionNames.map((fnName) => (
@@ -349,6 +444,18 @@ export default function Home() {
         </div>
         <label>Result</label>
         {newLocal}
+      </div>
+      <div className="flex flex-col justify-baseline items-start w-full h-full">
+        <h1 className="text-3xl font-bold mb-4 ">Access rights</h1>
+        <label className="text-lg font-bold">Owner: {owner}</label>
+        <label
+          className={`text-lg font-bold ${
+            hasAdminRole ? "text-red-500" : "text-green-500"
+          }`}
+        >
+          Current address has admin role:{" "}
+          {hasAdminRole === null ? "N/A" : hasAdminRole ? "YES" : "NO"}
+        </label>
       </div>
     </div>
   );
