@@ -1,8 +1,14 @@
 "use client";
 
-import { readContract, writeContract, getBytecode } from "@wagmi/core";
+import {
+  getBytecode,
+  getStorageAt,
+  readContract,
+  waitForTransactionReceipt,
+  writeContract,
+} from "@wagmi/core";
 import { useEffect, useMemo, useState } from "react";
-import { getAddress } from "viem";
+import { encodeFunctionData, getAddress, parseEther, keccak256 } from "viem";
 import { useAccount, useConfig, useStorageAt } from "wagmi";
 import Field from "./components/Field";
 import Upload from "./components/Upload";
@@ -12,12 +18,73 @@ type AbiInput = {
   type?: string;
 };
 
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    alert("Copied to clipboard!");
+  } catch (err) {
+    console.error("Failed to copy: ", err);
+    alert("Failed to copy to clipboard");
+  }
+}
+
 type AbiFunction = {
   type?: string;
   name?: string;
   inputs?: AbiInput[];
   stateMutability?: string;
 };
+
+type FunctionArgumentMap = Record<string, string>;
+type FunctionArgumentsStore = Record<string, FunctionArgumentMap>;
+
+const parseResult = (res: unknown | bigint): React.ReactElement => {
+  if (typeof res === "bigint") {
+    return (
+      <span className="flex flex-row justify-start items-center gap-1">
+        <span>{parseEther(res.toString(), "wei").toString()}</span>
+        <button
+          className="ml-2 p-1 border-2 rounded-lg bg-blue-400 text-white border-white"
+          onClick={(e) => {
+            if (e.currentTarget.innerText !== "to WEI") {
+              e.currentTarget.innerText = "to WEI";
+              e.currentTarget.previousSibling!.textContent =
+                res.toString() + " ETH";
+            } else {
+              e.currentTarget.innerText = "to ETH";
+              e.currentTarget.previousSibling!.textContent =
+                parseEther(res.toString(), "wei").toString() + " wei";
+            }
+          }}
+        >
+          Change ETH/WEI
+        </button>
+      </span>
+    );
+  } else if (typeof res === "object") {
+    return (
+      <pre className="whitespace-pre-wrap wrap-break-word">
+        {JSON.stringify(res, null, 2)}
+      </pre>
+    );
+  } else if (typeof res === "boolean") {
+    console.log("Boolean result:", res);
+    return (
+      <span className="text-white text-center">
+        {res ? (
+          <pre className="p-2 rounded-lg max-w-[8%] bg-green-400">TRUE</pre>
+        ) : (
+          <pre className="p-2 rounded-lg max-w-[8%] bg-red-400">FALSE</pre>
+        )}
+      </span>
+    );
+  } else {
+    return <span>{String(res)}</span>;
+  }
+};
+
+const makeInputKey = (input: AbiInput, index: number) =>
+  input.name ?? `__arg_${index}`;
 
 const ownerAbi = [
   {
@@ -46,21 +113,27 @@ const implementationSlot =
   "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 
 export default function Home() {
-  const [result, setResult] = useState<unknown>("");
+  const [result, setResult] = useState<unknown | bigint>("");
   const [abi, setAbi] = useState("");
   const { address, chainId, chain } = useAccount();
   const [contractAddress, setContractAddress] = useState("");
   const [functionNames, setFunctionNames] = useState<string[]>([]);
   const [selectedFunction, setSelectedFunction] = useState("");
-  const [argValues, setArgValues] = useState<Record<string, string[]>>({});
+  const [functionArguments, setFunctionArguments] =
+    useState<FunctionArgumentsStore>({});
   const [disableAbiChange, setDisableAbiChange] = useState(false);
   const [owner, setOwner] = useState<string>("");
   const [hasAdminRole, setHasAdminRole] = useState<boolean | null>(null);
   const [isEOA, setIsEOA] = useState<boolean | null>(false);
   const config = useConfig();
+  const [keccakHash, setKeccakHash] = useState<`0x${string}`>("0x");
   const canCall = Boolean(
     abi && contractAddress && selectedFunction && address
   );
+  const [storageSlotContent, setStorageSlotContent] = useState<
+    string | undefined | null
+  >(undefined);
+  const [slot, setSlot] = useState<string | undefined>("");
 
   useEffect(() => {
     async function bgJobs() {
@@ -121,7 +194,7 @@ export default function Home() {
     }
 
     bgJobs();
-  }, [contractAddress, chainId, config]);
+  }, [address, contractAddress, chainId, config]);
 
   const { data } = useStorageAt({
     address: contractAddress as `0x${string}`,
@@ -194,14 +267,35 @@ export default function Home() {
     canCall && selectedFunctionDefinition && !isReadOnlyFunction
   );
 
-  const activeArgs = useMemo(() => {
+  const orderedArgs = useMemo(() => {
     if (!selectedFunction) {
       return [] as string[];
     }
 
-    const storedValues = argValues[selectedFunction] ?? [];
-    return functionInputs.map((_, index) => storedValues[index] ?? "");
-  }, [argValues, functionInputs, selectedFunction]);
+    const fnArgs = functionArguments[selectedFunction] ?? {};
+    return functionInputs.map((input, index) => {
+      const key = makeInputKey(input, index);
+      return fnArgs[key] ?? "";
+    });
+  }, [functionArguments, functionInputs, selectedFunction]);
+
+  const calldata = useMemo(() => {
+    if (!abi || !selectedFunction) {
+      return "";
+    }
+
+    try {
+      const parsedAbi = JSON.parse(abi).abi;
+      return encodeFunctionData({
+        abi: parsedAbi,
+        functionName: selectedFunction,
+        args: orderedArgs as unknown[],
+      });
+    } catch (error) {
+      console.error("Failed to encode calldata", error);
+      return "";
+    }
+  }, [abi, orderedArgs, selectedFunction]);
 
   const onClickRead = async () => {
     try {
@@ -213,9 +307,9 @@ export default function Home() {
         chainId: chainId,
         address: contractAddress?.toLowerCase() as `0x${string}`,
         account: address?.toLowerCase() as `0x${string}`,
-        args: activeArgs.map((v) => {
-          return v.toLowerCase();
-        }),
+        args: orderedArgs.map((value) =>
+          typeof value === "string" ? value.toLowerCase() : value
+        ),
       })) as unknown;
 
       setResult(res);
@@ -234,12 +328,25 @@ export default function Home() {
         chainId: chainId,
         address: contractAddress?.toLowerCase() as `0x${string}`,
         account: address?.toLowerCase() as `0x${string}`,
-        args: activeArgs.map((v) => {
-          return v.toLowerCase();
-        }),
+        args: orderedArgs.map((value) =>
+          typeof value === "string" ? value.toLowerCase() : value
+        ),
       })) as unknown;
 
-      setResult(res);
+      console.log("RESULT", res);
+
+      waitForTransactionReceipt(config, {
+        hash: res as `0x${string}`,
+        chainId: chainId,
+      })
+        .then((receipt) => {
+          setResult(receipt);
+          console.log("Transaction receipt:", receipt);
+        })
+        .catch((r) => {
+          setResult(r);
+          console.log("Transaction receipt reject:", r);
+        });
     } catch (err) {
       console.error(err);
       setResult("Error reading contract: " + (err as Error).message);
@@ -247,25 +354,32 @@ export default function Home() {
   };
   const newLocal: React.ReactNode =
     result !== undefined && result !== null && result !== "" ? (
-      <span className="rounded-lg bg-amber-200 p-2 text-clip overflow-scroll border-2">
-        {typeof result === "object" ? JSON.stringify(result) : String(result)}
+      <span className="rounded-lg bg-amber-200 min-h-[150px] p-2 text-clip overflow-scroll border-2">
+        {parseResult(result)}
       </span>
     ) : null;
 
   return (
-    <div className="w-screen h-screen flex flex-row justify-between items-start p-4 gap-10">
-      <div className="w-full flex flex-col pt-2.5 px-4 gap-4 border-r-2">
-        <label className="text-xl font-bold">Contract Call</label>
+    <div className="min-h-screen w-full flex flex-col gap-6 p-4 overflow-x-hidden md:flex-row md:items-start">
+      <div className="w-full flex flex-col justify-start items-stretch pt-2.5 px-4 gap-4 border border-gray-200 rounded-xl md:border-0 md:border-r-2 md:rounded-none md:pr-6 md:max-w-[50%] md:basis-1/2 md:flex-[0_0_50%]">
+        <label className="text-xl font-bold self-center">
+          <h2 className="text-[28px]">Contract Call</h2>
+        </label>
         <label className="text-lg font-bold">Chain ID: {chainId}</label>
         <label className="text-lg font-bold">Chain: {chain?.name}</label>
         <label className="text-lg font-bold">
           Is EOA: {isEOA === null ? "N/A" : isEOA ? "YES" : "NO"}
         </label>
-        <label className="text-lg font-bold">
-          Contract implementation address:{" "}
-          {implementationAddress?.toLowerCase() ?? "Not available"}
+        <label className="text-lg font-bold flex flex-col md:flex-row gap-1 justify-start items-start md:items-end">
+          <span className="truncate">Contract implementation address: </span>
+          <span className="text-[16px]">
+            {implementationAddress?.toLowerCase() ?? "Not available"}
+          </span>
         </label>
         <div className="flex flex-col gap-2 border-t-2 border-blue-500 p-5 border-2 rounded-xl">
+          <h3 className="font-bold text-[20px] self-center mb-0 md:mb-2">
+            ABI
+          </h3>
           <textarea
             placeholder="Define ABI"
             disabled={disableAbiChange}
@@ -287,7 +401,10 @@ export default function Home() {
               setFunctionNames(fnNames.length > 0 ? fnNames : []);
             }}
           ></textarea>
-          <span>OR</span>
+          <label>
+            <strong>{functionNames.length}</strong> functions
+          </label>
+          <span className="self-center font-bold">OR</span>
           <Upload
             uploadCb={(file: File) => {
               const reader = new FileReader();
@@ -308,6 +425,7 @@ export default function Home() {
         </div>
         <div className="flex flew-row gap-2.5 justify-center items-center">
           <Field
+            maxLength={42}
             onChange={(e) => {
               if (
                 e.target.value.length > 2 &&
@@ -340,16 +458,20 @@ export default function Home() {
                   placeholder={
                     input.name ? `${input.name} (${input.type})` : `arg${index}`
                   }
-                  value={activeArgs[index] ?? ""}
+                  value={orderedArgs[index] ?? ""}
                   onChange={(e) => {
                     const value = e.target.value;
-                    setArgValues((prev) => {
-                      const next = { ...prev };
-                      const current = next[selectedFunction] ?? [];
-                      const updated = [...current];
-                      updated[index] = value;
-                      next[selectedFunction] = updated;
-                      return next;
+                    if (!selectedFunction) {
+                      return;
+                    }
+                    const key = makeInputKey(input, index);
+                    setFunctionArguments((prev) => {
+                      const fnArgs = { ...(prev[selectedFunction] ?? {}) };
+                      fnArgs[key] = value;
+                      return {
+                        ...prev,
+                        [selectedFunction]: fnArgs,
+                      };
                     });
                   }}
                   name={input.name}
@@ -358,16 +480,17 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (!address) {
+                      if (!address || !selectedFunction) {
                         return;
                       }
-                      setArgValues((prev) => {
-                        const next = { ...prev };
-                        const current = next[selectedFunction] ?? [];
-                        const updated = [...current];
-                        updated[index] = address.toLowerCase();
-                        next[selectedFunction] = updated;
-                        return next;
+                      const key = makeInputKey(input, index);
+                      setFunctionArguments((prev) => {
+                        const fnArgs = { ...(prev[selectedFunction] ?? {}) };
+                        fnArgs[key] = address.toLowerCase();
+                        return {
+                          ...prev,
+                          [selectedFunction]: fnArgs,
+                        };
                       });
                     }}
                     disabled={!address}
@@ -390,6 +513,31 @@ export default function Home() {
                         d="m23.71 9.29l-7-7A1 1 0 0 0 16 2H6a2 2 0 0 0-2 2v24a2 2 0 0 0 2 2h8v-2H6V4h8v6a2 2 0 0 0 2 2h6v2h2v-4a1 1 0 0 0-.29-.71M16 4.41L21.59 10H16Z"
                       />
                     </svg>
+                  </button>
+                )}
+                {input.type?.toLowerCase().includes("bytes32") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedFunction) {
+                        return;
+                      }
+                      const zeroBytes32 =
+                        "0x0000000000000000000000000000000000000000000000000000000000000000";
+                      const key = makeInputKey(input, index);
+                      setFunctionArguments((prev) => {
+                        const fnArgs = { ...(prev[selectedFunction] ?? {}) };
+                        fnArgs[key] = zeroBytes32;
+                        return {
+                          ...prev,
+                          [selectedFunction]: fnArgs,
+                        };
+                      });
+                    }}
+                    className="h-12 w-12 flex items-center justify-center rounded-lg border-2 border-blue-500 text-blue-500"
+                    aria-label="Use zero bytes32"
+                  >
+                    0x0
                   </button>
                 )}
               </div>
@@ -422,6 +570,21 @@ export default function Home() {
             </span>
           </span>
         </div>
+        <span className="max-w-[60%] wrap-break-word flex flex-col justify-baseline gap-4">
+          <div className="flex flex-row gap-4 justify-start items-center">
+            <label className="font-semibold">Calldata</label>
+            <button
+              disabled={!calldata}
+              onClick={() => copyToClipboard(calldata)}
+              className={`p-2 border-2 rounded-lg ${
+                !calldata ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+            >
+              Copy calldata
+            </button>
+          </div>
+          <span>{calldata}</span>
+        </span>
         <div className="flex flex-row gap-2.5">
           <button
             disabled={!canPressRead}
@@ -445,17 +608,76 @@ export default function Home() {
         <label>Result</label>
         {newLocal}
       </div>
-      <div className="flex flex-col justify-baseline items-start w-full h-full">
-        <h1 className="text-3xl font-bold mb-4 ">Access rights</h1>
-        <label className="text-lg font-bold">Owner: {owner}</label>
-        <label
-          className={`text-lg font-bold ${
-            hasAdminRole ? "text-red-500" : "text-green-500"
-          }`}
-        >
-          Current address has admin role:{" "}
-          {hasAdminRole === null ? "N/A" : hasAdminRole ? "YES" : "NO"}
-        </label>
+      <div className="flex-1 w-full flex flex-col gap-6 px-4">
+        <div className="flex flex-col border-b-2 justify-start p-2 items-start w-full wrap-break-word">
+          <h1 className="text-3xl font-bold mb-4 self-center">Access rights</h1>
+          <label className="text-lg font-bold wrap-break-word w-full">
+            Owner (Ownable check): {owner}
+          </label>
+          <label
+            className={`text-lg font-bold wrap-break-word w-full ${
+              hasAdminRole ? "text-red-500" : "text-green-500"
+            }`}
+          >
+            Current address has admin role (AccessControl check):{" "}
+            {hasAdminRole === null ? "N/A" : hasAdminRole ? "YES" : "NO"}
+          </label>
+        </div>
+        <div className="w-full p-2 wrap-break-word">
+          <h1 className="text-3xl font-bold mb-4 text-center">Storage slots</h1>{" "}
+          <div className="flex flex-col justify-baseline items-start gap-2 wrap-break-word w-full">
+            <Field
+              name="storage-slot"
+              type="text"
+              disabled={!contractAddress || isEOA}
+              onChange={async (e) => {
+                let val = e.currentTarget.value;
+                // Pad to 32 bytes (64 hex chars) if not already
+                if (val.startsWith("0x")) {
+                  val = val.slice(2);
+                }
+                if (val.length < 64) {
+                  val = val.padStart(64, "0");
+                }
+                val = "0x" + val;
+                const content = await getStorageAt(config, {
+                  address: contractAddress as `0x${string}`,
+                  chainId: chainId,
+                  slot: val as `0x${string}`,
+                });
+                setSlot(val);
+                setStorageSlotContent(content?.toString());
+              }}
+              placeholder="Enter storage slot"
+            />
+            <span className="font-semibold wrap-break-word w-full">
+              Slot: {slot}
+            </span>
+            <span className="font-semibold">Slot value:</span>
+            <span className="wrap-break-word whitespace-pre-wrap w-full">
+              {storageSlotContent}
+            </span>
+            <span className="font-semibold border-t-2 pt-4 w-full h-full text-left">Keccak256: {keccakHash}</span>
+            <Field
+              placeholder="Enter value for HASHING"
+              name="keccak256"
+              onChange={(e) => {
+                const input = e.currentTarget.value;
+                if (!input) {
+                  setKeccakHash("0x");
+                  return;
+                }
+                let hexInput: `0x${string}`;
+                if (!input.startsWith("0x")) {
+                  hexInput = `0x${Buffer.from(input, "utf8").toString("hex")}`;
+                } else {
+                  hexInput = input as `0x${string}`;
+                }
+                setKeccakHash(keccak256(hexInput));
+              }}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

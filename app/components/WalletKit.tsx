@@ -24,7 +24,7 @@ export default function WalletKit({
   const queryClient = new QueryClient();
 
   const config = getDefaultConfig({
-    appName: "EVM Debug",
+    appName: "EVM Inspector",
     projectId: "EVM_DEBUG_PROJECT_ID",
     chains: [mainnet, polygon, optimism, arbitrum, base, monad, monadTestnet,sepolia],
     ssr: true, // If your dApp uses server side rendering (SSR)
