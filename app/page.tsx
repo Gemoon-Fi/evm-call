@@ -14,6 +14,7 @@ import AliveContracts from "./components/AliveContracts";
 import Field from "./components/Field";
 import ParsedResult from "./components/ParsedResult";
 import Upload from "./components/Upload";
+import RolesChecker from "./components/RoleChecker";
 
 type AbiInput = {
   name?: string;
@@ -607,6 +608,7 @@ export default function Home() {
             Current address has admin role (AccessControl check):{" "}
             {hasAdminRole === null ? "N/A" : hasAdminRole ? "YES" : "NO"}
           </label>
+          <RolesChecker config={config} contractAddress={contractAddress} />
         </div>
         <div className="w-full p-2 wrap-break-word">
           <h1 className="text-3xl font-bold mb-4 text-center">Storage slots</h1>{" "}

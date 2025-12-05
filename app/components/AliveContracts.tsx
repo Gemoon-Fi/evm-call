@@ -36,7 +36,7 @@ export default function AliveContracts({
         placeholder="Parse contracts with space delimiter"
         className="border-2 rounded-lg p-1 w-full h-full min-h-[100px] resize-y"
       />
-      <ul>
+      <ul className="overflow-y-scroll max-h-[200px] border-2 p-2 rounded-lg">
         {inputContracts.map((c) => (
           <li
             key={c}
