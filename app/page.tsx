@@ -8,9 +8,11 @@ import {
   writeContract,
 } from "@wagmi/core";
 import { useEffect, useMemo, useState } from "react";
-import { encodeFunctionData, getAddress, parseEther, keccak256 } from "viem";
+import { encodeFunctionData, getAddress, keccak256 } from "viem";
 import { useAccount, useConfig, useStorageAt } from "wagmi";
+import AliveContracts from "./components/AliveContracts";
 import Field from "./components/Field";
+import ParsedResult from "./components/ParsedResult";
 import Upload from "./components/Upload";
 
 type AbiInput = {
@@ -37,51 +39,6 @@ type AbiFunction = {
 
 type FunctionArgumentMap = Record<string, string>;
 type FunctionArgumentsStore = Record<string, FunctionArgumentMap>;
-
-const parseResult = (res: unknown | bigint): React.ReactElement => {
-  if (typeof res === "bigint") {
-    return (
-      <span className="flex flex-row justify-start items-center gap-1">
-        <span>{parseEther(res.toString(), "wei").toString()}</span>
-        <button
-          className="ml-2 p-1 border-2 rounded-lg bg-blue-400 text-white border-white"
-          onClick={(e) => {
-            if (e.currentTarget.innerText !== "to WEI") {
-              e.currentTarget.innerText = "to WEI";
-              e.currentTarget.previousSibling!.textContent =
-                res.toString() + " ETH";
-            } else {
-              e.currentTarget.innerText = "to ETH";
-              e.currentTarget.previousSibling!.textContent =
-                parseEther(res.toString(), "wei").toString() + " wei";
-            }
-          }}
-        >
-          Change ETH/WEI
-        </button>
-      </span>
-    );
-  } else if (typeof res === "object") {
-    return (
-      <pre className="whitespace-pre-wrap wrap-break-word">
-        {JSON.stringify(res, null, 2)}
-      </pre>
-    );
-  } else if (typeof res === "boolean") {
-    console.log("Boolean result:", res);
-    return (
-      <span className="text-white text-center">
-        {res ? (
-          <pre className="p-2 rounded-lg max-w-[8%] bg-green-400">TRUE</pre>
-        ) : (
-          <pre className="p-2 rounded-lg max-w-[8%] bg-red-400">FALSE</pre>
-        )}
-      </span>
-    );
-  } else {
-    return <span>{String(res)}</span>;
-  }
-};
 
 const makeInputKey = (input: AbiInput, index: number) =>
   input.name ?? `__arg_${index}`;
@@ -371,7 +328,7 @@ export default function Home() {
   const newLocal: React.ReactNode =
     result !== undefined && result !== null && result !== "" ? (
       <span className="rounded-lg bg-amber-200 min-h-[150px] p-2 text-clip overflow-scroll border-2">
-        {parseResult(result)}
+        <ParsedResult result={result} />
       </span>
     ) : null;
 
@@ -388,8 +345,12 @@ export default function Home() {
         </label>
         <label className="text-lg font-bold flex flex-col md:flex-row gap-1 justify-start items-start md:items-end">
           <span className="truncate">Contract implementation address: </span>
-          <span className="text-[16px]">
-            {implementationAddress?.toLowerCase() ?? "Not available"}
+          <span className="text-[16px] bg-green-400 text-white p-1 rounded-lg">
+            {implementationAddress?.toLowerCase() &&
+            implementationAddress.toString() !==
+              "0x0000000000000000000000000000000000000000"
+              ? implementationAddress.toLowerCase()
+              : "Not available"}
           </span>
         </label>
         <div className="flex flex-col gap-2 border-t-2 border-blue-500 p-5 border-2 rounded-xl">
@@ -457,7 +418,7 @@ export default function Home() {
             value={contractAddress}
           />
           {isProxy && (
-            <span className="bg-green-300 rounded-lg text-center text-white font-bold p-2 text-nowrap">
+            <span className="bg-green-400 rounded-lg text-center text-white font-bold p-2 text-nowrap">
               Contract is proxy
             </span>
           )}
@@ -627,8 +588,16 @@ export default function Home() {
       <div className="flex-1 w-full flex flex-col gap-6 px-4">
         <div className="flex flex-col border-b-2 justify-start p-2 items-start w-full wrap-break-word">
           <h1 className="text-3xl font-bold mb-4 self-center">Access rights</h1>
-          <label className="text-lg font-bold wrap-break-word w-full">
-            Owner (Ownable check): {owner}
+          <label className="text-lg font-bold wrap-break-word w-full flex flex-row gap-2 justify-between items-center">
+            <strong>Owner (Ownable check): {owner}</strong>
+            {owner === address ? (
+              <span className="text-green-500 text-sm">
+                {" "}
+                (You are the owner)
+              </span>
+            ) : (
+              <span></span>
+            )}
           </label>
           <label
             className={`text-lg font-bold wrap-break-word w-full ${
@@ -695,8 +664,15 @@ export default function Home() {
               }}
             />
             <span className="font-semibold border-t-2 pt-4 w-full h-full text-left">
-              Clipboard keccak256: {keccak256((`0x${(clipboardSelected ?? "")}`) as `0x${string}`)}
+              Clipboard keccak256:{" "}
+              {keccak256(`0x${clipboardSelected ?? ""}` as `0x${string}`)}
             </span>
+          </div>
+        </div>
+        <div className="w-full h-full flex flex-col gap-2">
+          <h1 className="text-lg font-bold">Contracts exists</h1>
+          <div className="w-full h-full">
+            <AliveContracts config={config} />
           </div>
         </div>
       </div>
